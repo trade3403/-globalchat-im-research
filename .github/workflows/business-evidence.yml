@@ -1,0 +1,71 @@
+name: BIZ-00 public commercial evidence
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/business-evidence.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {id: biz01, name: Kuxin, url: 'https://www.kuxin.co/'}
+          - {id: biz02, name: Yunbao, url: 'https://www.yunbaokj.com/product.html'}
+          - {id: biz03, name: MirrorFly, url: 'https://www.mirrorfly.com/'}
+          - {id: biz04, name: Infosif, url: 'https://infosif.com/'}
+          - {id: biz05, name: Yunmai, url: 'https://www.66app.im/'}
+          - {id: biz06, name: Incodes, url: 'https://incodeslab.com/'}
+          - {id: biz07, name: Miracuves, url: 'https://miracuves.com/'}
+    steps:
+      - name: Collect public page metadata
+        env:
+          VENDOR: ${{ matrix.name }}
+          URL: ${{ matrix.url }}
+        run: |
+          mkdir -p reports
+          python3 - <<'PY'
+          import os,urllib.request,urllib.parse,datetime,json,hashlib
+          from html.parser import HTMLParser
+          class Parser(HTMLParser):
+              def __init__(self):
+                  super().__init__(); self.title=''; self.in_title=False; self.links=[]
+              def handle_starttag(self,tag,attrs):
+                  a=dict(attrs)
+                  if tag=='title': self.in_title=True
+                  if tag=='a' and a.get('href'): self.links.append(a['href'])
+              def handle_endtag(self,tag):
+                  if tag=='title': self.in_title=False
+              def handle_data(self,data):
+                  if self.in_title: self.title+=data
+          url=os.environ['URL']
+          row={'vendor':os.environ['VENDOR'],'requested_url':url,'utc':datetime.datetime.now(datetime.timezone.utc).isoformat(),'status':'unverified','review':'Manual review of pricing, license, scope and claims required'}
+          try:
+              req=urllib.request.Request(url,headers={'User-Agent':'GlobalChatResearch/1.0 (public product catalog review)'})
+              with urllib.request.urlopen(req,timeout=25) as r:
+                  raw=r.read(2000000)
+                  row.update(http_status=r.status,final_url=r.url,sha256=hashlib.sha256(raw).hexdigest())
+                  p=Parser(); p.feed(raw.decode(r.headers.get_content_charset() or 'utf-8',errors='replace'))
+                  row['title']=p.title.strip()[:250]
+                  links=[]
+                  for x in p.links:
+                      u=urllib.parse.urljoin(r.url,x)
+                      q=urllib.parse.urlsplit(u)
+                      if q.scheme=='https' and q.hostname==urllib.parse.urlsplit(r.url).hostname and any(k in u.lower() for k in ['price','pricing','product','solution','license','source','demo']):
+                          links.append(urllib.parse.urlunsplit((q.scheme,q.netloc,q.path,'','')))
+                  row['candidate_links']=sorted(set(links))[:40]
+                  row['status']='retrieved'
+          except Exception as e:
+              row['error']=str(e)[:300]
+          with open('reports/evidence.json','w') as f: json.dump(row,f,ensure_ascii=False,indent=2)
+          print(row['vendor'],row['status'])
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: commercial-${{ matrix.id }}
+          path: reports/evidence.json
+          retention-days: 30
