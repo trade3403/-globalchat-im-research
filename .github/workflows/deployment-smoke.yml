@@ -1,0 +1,101 @@
+name: Phase 6 isolated deployment smoke
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/deployment-smoke.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {index: 0, repo: WuKongIM/WuKongIM, label: wukong}
+          - {index: 1, repo: juggleim/im-server, label: juggle}
+          - {index: 4, repo: openimsdk/open-im-server, label: openim}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: evidence-${{ matrix.index }}
+          run-id: 45753958632
+          github-token: ${{ github.token }}
+          path: baseline
+      - name: Fetch pinned public source
+        env:
+          REPO: ${{ matrix.repo }}
+        run: |
+          set -euo pipefail
+          test "$(cat baseline/source.txt)" = "https://github.com/$REPO"
+          rev=$(cat baseline/revision.txt)
+          [[ "$rev" =~ ^[0-9a-f]{40}$ ]]
+          git init upstream
+          git -C upstream remote add origin "https://github.com/$REPO.git"
+          git -C upstream fetch --depth=1 origin "$rev"
+          git -C upstream checkout --detach FETCH_HEAD
+          mkdir -p reports
+          printf '%s\n' "$rev" > reports/revision.txt
+          lscpu > reports/cpu.txt
+          free -m > reports/memory.txt
+          docker version > reports/docker.txt
+      - name: Start disposable local stack and measure readiness
+        env:
+          LABEL: ${{ matrix.label }}
+        run: |
+          set -euo pipefail
+          cd upstream
+          # Restrict every published port to loopback using resolved compose JSON.
+          docker compose config --format json > /tmp/compose-resolved.json
+          python3 - <<'PY'
+          import json
+          p='/tmp/compose-resolved.json'
+          c=json.load(open(p))
+          for s in c['services'].values():
+              for port in s.get('ports',[]):
+                  if not isinstance(port,dict): raise RuntimeError('Unexpected port format')
+                  port['host_ip']='127.0.0.1'
+          json.dump(c,open(p,'w'))
+          PY
+          compose=(docker compose --project-directory "$PWD" -f /tmp/compose-resolved.json -p imresearch)
+          start=$(date +%s)
+          if [ "$LABEL" = wukong ]; then
+            "${compose[@]}" up -d --build wk-node1 wk-node2 wk-node3
+            ports="15001 15002 15003"
+          elif [ "$LABEL" = juggle ]; then
+            "${compose[@]}" up -d --build
+            ports="9001 9003"
+          else
+            "${compose[@]}" up -d --build
+            ports=""
+          fi
+          python3 - "$ports" <<'PY'
+          import socket,time,sys
+          ports=[int(x) for x in sys.argv[1].split()]
+          for p in ports:
+              for _ in range(90):
+                  try:
+                      with socket.create_connection(('127.0.0.1',p),timeout=2): break
+                  except OSError: time.sleep(2)
+              else: raise RuntimeError(f'Port {p} unavailable')
+          PY
+          "${compose[@]}" ps --format json > ../reports/compose-ps.json
+          docker stats --no-stream --format '{{json .}}' > ../reports/resource-snapshot.jsonl
+          printf 'stack startup elapsed seconds: %s\nTCP ports checked: %s\n' "$(( $(date +%s)-start ))" "$ports" > ../reports/smoke.txt
+          if [ -z "$ports" ]; then echo 'OpenIM compose deployment only; application readiness not verified' >> ../reports/smoke.txt; fi
+          echo 'Not a messaging benchmark. No throughput or delivery guarantees measured.' >> ../reports/smoke.txt
+      - name: Cleanup
+        if: always()
+        run: |
+          if test -f /tmp/compose-resolved.json; then
+            docker compose --project-directory "$PWD/upstream" -f /tmp/compose-resolved.json -p imresearch down -v --remove-orphans || true
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: deployment-smoke-${{ matrix.label }}
+          path: reports/
+          retention-days: 30
