@@ -1,0 +1,81 @@
+name: OpenIM SDK architecture deep dive
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/openim-deep-dive.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {index: 4, repo: openimsdk/open-im-server, label: server}
+          - {index: 5, repo: openimsdk/openim-sdk-core, label: sdk-core}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: evidence-${{ matrix.index }}
+          run-id: 45753958632
+          github-token: ${{ github.token }}
+          path: baseline
+      - name: Analyze pinned OpenIM source
+        env:
+          REPO: ${{ matrix.repo }}
+        run: |
+          set -euo pipefail
+          test "$(cat baseline/source.txt)" = "https://github.com/$REPO"
+          rev=$(cat baseline/revision.txt)
+          [[ "$rev" =~ ^[0-9a-f]{40}$ ]]
+          git init upstream
+          git -C upstream remote add origin "https://github.com/$REPO.git"
+          git -C upstream fetch --depth=1 origin "$rev"
+          mkdir -p reports
+          python3 - "$rev" "$REPO" <<'PY'
+          import subprocess,re,sys,pathlib,collections
+          rev,repo=sys.argv[1:]
+          def git(*args):
+              return subprocess.check_output(['git','-C','upstream',*args],text=True,errors='replace')
+          files=git('ls-tree','-r','--name-only',rev).splitlines()
+          topics={
+            'SDK lifecycle and platform bridge':r'sdk|login|logout|init|callback|listener|bridge|wasm|ffi',
+            'connection and authentication':r'connection|websocket|heartbeat|reconnect|auth|token',
+            'message lifecycle and reliability':r'message|send|receive|ack|retry|seq|dedup',
+            'offline incremental sync':r'sync|pull|cursor|version|sequence|offline',
+            'local database and cache':r'database|sqlite|cache|storage|local|model',
+            'conversation and unread':r'conversation|unread|read|receipt|revoke',
+            'friend group and user':r'friend|group|user|member|relation',
+            'media and push':r'file|upload|media|push|notification',
+            'server API and distribution':r'api|rpc|gateway|kafka|redis|mongo|etcd|discovery',
+            'security and multi-device':r'permission|auth|device|platform|session|encrypt'
+          }
+          srcfiles=[f for f in files if f.endswith(('.go','.proto','.ts','.js','.dart','.kt','.swift','.rs')) and not any(x in '/'+f+'/' for x in ['/vendor/','/node_modules/','/dist/'])]
+          counts=collections.Counter('/'.join(f.split('/')[:2]) for f in srcfiles)
+          out=[f'# {repo} SDK and service architecture evidence',f'Revision: {rev}','Static source index only; not a verified runtime feature matrix.','','## Package inventory']
+          out += [f'- {p}: {n}' for p,n in counts.most_common(120)]
+          for topic,pattern in topics.items():
+              rx=re.compile(pattern,re.I)
+              paths=[f for f in srcfiles if rx.search(f)]
+              out+=['',f'## {topic}',f'Candidate files: {len(paths)}; first 80 indexed']
+              for f in paths[:80]:
+                  out.append(f'### [{f}](https://github.com/{repo}/blob/{rev}/{f})')
+                  hits=0
+                  for i,line in enumerate(git('show',f'{rev}:{f}').splitlines(),1):
+                      if re.search(r'^\s*(func |type |service |rpc |message |export |class |interface )',line) or (rx.search(line) and re.search(r'callback|listener|return|test|register',line,re.I)):
+                          out.append(f'- L{i}: {line.strip()[:240]}')
+                          hits+=1
+                          if hits>=30: break
+          out+=['','## GlobalChat review gates','- Trace send, persist, acknowledgment and retry ordering before inferring delivery guarantees.','- Trace synchronization cursor and local transactions before inferring recovery guarantees.','- Separate platform bindings from SDK core; verify exported contracts and callback threading.','- Verify each repository license and deployment dependency independently.','- Identify portable interface patterns without copying implementation.']
+          pathlib.Path('reports/openim-architecture-evidence.md').write_text('\n'.join(out))
+          pathlib.Path('reports/revision.txt').write_text(rev+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openim-${{ matrix.label }}-evidence
+          path: reports/
+          retention-days: 30
