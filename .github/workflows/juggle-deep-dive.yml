@@ -1,0 +1,81 @@
+name: JuggleIM architecture deep dive
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/juggle-deep-dive.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {index: 1, repo: juggleim/im-server, label: im-server}
+          - {index: 2, repo: juggleim/jugglechat-server, label: business-server}
+          - {index: 3, repo: juggleim/imserver-console, label: console}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: evidence-${{ matrix.index }}
+          run-id: 45753958632
+          github-token: ${{ github.token }}
+          path: baseline
+      - name: Analyze pinned source
+        env:
+          REPO: ${{ matrix.repo }}
+        run: |
+          set -euo pipefail
+          test "$(cat baseline/source.txt)" = "https://github.com/$REPO"
+          rev=$(cat baseline/revision.txt)
+          [[ "$rev" =~ ^[0-9a-f]{40}$ ]]
+          git init upstream
+          git -C upstream remote add origin "https://github.com/$REPO.git"
+          git -C upstream fetch --depth=1 origin "$rev"
+          mkdir -p reports
+          python3 - "$rev" "$REPO" <<'PY'
+          import subprocess,re,sys,pathlib,collections
+          rev,repo=sys.argv[1:]
+          def git(*args):
+              return subprocess.check_output(['git','-C','upstream',*args],text=True,errors='replace')
+          files=git('ls-tree','-r','--name-only',rev).splitlines()
+          topics={
+            'module boundaries and actor RPC':r'actor|rpc|module|register|router',
+            'auth and user':r'auth|token|login|register|user',
+            'friend and group':r'friend|group|member|invite|apply',
+            'messages and storage':r'message|conversation|storage|database|dao',
+            'tenant and access control':r'tenant|appkey|appid|permission|role|admin',
+            'events and extensions':r'webhook|callback|event|plugin|bot|notify',
+            'console and operations':r'console|dashboard|monitor|statistic|audit|manage',
+            'configuration and business policies':r'config|setting|policy|workflow|approval'
+          }
+          out=[f'# {repo} architecture evidence',f'Revision: {rev}','Static evidence, not verified behavior or architectural conclusions.']
+          counts=collections.Counter('/'.join(f.split('/')[:2]) for f in files if f.endswith(('.go','.ts','.vue','.js','.sql')))
+          out+=['','## Package inventory']+[f'- {p}: {n}' for p,n in counts.most_common(100)]
+          sources=[f for f in files if f.endswith(('.go','.ts','.vue','.js','.sql','.proto')) and not any(x in '/'+f+'/' for x in ['/vendor/','/node_modules/','/dist/'])]
+          for topic,pat in topics.items():
+              rx=re.compile(pat,re.I)
+              candidates=[f for f in sources if rx.search(f)]
+              out+=['',f'## {topic}',f'Candidate paths: {len(candidates)} (first 80 indexed)']
+              for f in candidates[:80]:
+                  out.append(f'### [{f}](https://github.com/{repo}/blob/{rev}/{f})')
+                  src=git('show',f'{rev}:{f}')
+                  hits=0
+                  for i,line in enumerate(src.splitlines(),1):
+                      if re.search(r'^\s*(func |type |export |class |interface |CREATE TABLE|service |message )',line,re.I) or (rx.search(line) and re.search(r'route|register|permission|handle|test|callback',line,re.I)):
+                          out.append(f'- L{i}: {line.strip()[:220]}')
+                          hits+=1
+                          if hits>=25: break
+          out+=['','## Review gates','- Trace actual authorization and tenant isolation across API, service and persistence layers.','- Distinguish core messaging from product policies and UI controls.','- Verify extension contracts, callbacks and license scope separately.','- Do not infer workflow configurability from keyword matches.']
+          pathlib.Path('reports/architecture-evidence.md').write_text('\n'.join(out))
+          pathlib.Path('reports/revision.txt').write_text(rev+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: juggle-${{ matrix.label }}-evidence
+          path: reports/
+          retention-days: 30
