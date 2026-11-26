@@ -1,0 +1,46 @@
+name: IM source inventory
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/source-analysis.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        repository: [WuKongIM/WuKongIM, juggleim/im-server, juggleim/jugglechat-server, juggleim/imserver-console, openimsdk/open-im-server, openimsdk/openim-sdk-core]
+    steps:
+      - name: Collect source evidence without executing upstream code
+        env:
+          UPSTREAM: ${{ matrix.repository }}
+        run: |
+          set -euo pipefail
+          export GIT_TERMINAL_PROMPT=0
+          mkdir -p reports
+          git -c core.hooksPath=/dev/null clone --depth=1 --no-checkout "https://github.com/$UPSTREAM.git" upstream
+          git -C upstream rev-parse HEAD > reports/revision.txt
+          printf 'https://github.com/%s\n' "$UPSTREAM" > reports/source.txt
+          git -C upstream ls-tree -r --name-only HEAD > reports/files.txt
+          git -C upstream ls-tree --name-only HEAD | grep -Ei '^(license|copying|notice)(\.|$)' > reports/license-paths.txt || true
+          while IFS= read -r path; do
+            git -C upstream show "HEAD:$path" >> reports/licenses.txt
+            printf '\n' >> reports/licenses.txt
+          done < reports/license-paths.txt
+          for topic in 'websocket|gateway|connection' 'ack|retry|dedup|sequence' 'raft|cluster|shard|slot' 'persist|storage|message_store' 'friend|group|conversation|sync' 'tenant|permission|auth|workflow'; do
+            printf '\n## %s\n' "$topic" >> reports/evidence.txt
+            git -C upstream grep -I -n -i -E "$topic" HEAD -- '*.go' '*.rs' '*.ts' '*.proto' '*.md' | head -n 200 >> reports/evidence.txt || true
+          done
+          wc -l reports/files.txt >> "$GITHUB_STEP_SUMMARY"
+          cat reports/source.txt reports/revision.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Save evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: evidence-${{ strategy.job-index }}
+          path: reports/
+          retention-days: 14
