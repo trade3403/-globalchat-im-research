@@ -1,0 +1,62 @@
+name: GlobalChat gap evidence review
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/globalchat-gap-review.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 45754075534
+          github-token: ${{ github.token }}
+          path: evidence/wukong
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 45754148331
+          github-token: ${{ github.token }}
+          path: evidence/juggle
+      - uses: actions/download-artifact@v4
+        with:
+          run-id: 45754202161
+          github-token: ${{ github.token }}
+          path: evidence/openim
+      - name: Validate evidence and assemble review packet
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib,re,hashlib
+          root=pathlib.Path('evidence')
+          expected={'wukong':1,'juggle':3,'openim':2}
+          out=['# Phase 5 evidence integrity review','','Static evidence only; this is not a comparative benchmark.']
+          for name,n in expected.items():
+              paths=list((root/name).rglob('revision.txt'))
+              assert len(paths)==n,(name,len(paths),n)
+              for p in paths:
+                  rev=p.read_text().strip()
+                  assert re.fullmatch('[0-9a-f]{40}',rev),p
+                  reports=list(p.parent.glob('*.md'))
+                  assert reports,p
+                  for report in reports:
+                      data=report.read_bytes()
+                      assert data and rev.encode() in data,report
+                      out.append(f'- {report}: revision {rev}; SHA256 {hashlib.sha256(data).hexdigest()}')
+          audit=pathlib.Path('reports/phase5-globalchat-gap.md').read_text()
+          assert 'c360758470edae514d237256c2b8c5cb270f39d1' in audit
+          out+=['','## Product preliminary audit','',audit,'','## Unresolved gates','- Cross-repository checkout needs independent read-only authorization.','- Actual competitor call-path comparison and runtime tests remain pending.']
+          pathlib.Path('phase5-review.md').write_text('\n'.join(out))
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: phase5-review
+          path: phase5-review.md
+          retention-days: 30
