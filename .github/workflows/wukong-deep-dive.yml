@@ -1,0 +1,73 @@
+name: WuKongIM architecture deep dive
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/wukong-deep-dive.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  trace:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: evidence-0
+          run-id: 45753958632
+          github-token: ${{ github.token }}
+          path: baseline
+      - name: Trace pinned source
+        run: |
+          set -euo pipefail
+          test "$(cat baseline/source.txt)" = "https://github.com/WuKongIM/WuKongIM"
+          rev=$(cat baseline/revision.txt)
+          [[ "$rev" =~ ^[0-9a-f]{40}$ ]]
+          git init upstream
+          git -C upstream remote add origin https://github.com/WuKongIM/WuKongIM.git
+          git -C upstream fetch --depth=1 origin "$rev"
+          mkdir -p reports
+          python3 - "$rev" <<'PY'
+          import subprocess, re, sys, pathlib, collections
+          rev=sys.argv[1]
+          def git(*args):
+              return subprocess.check_output(['git','-C','upstream',*args],text=True,errors='replace')
+          files=git('ls-tree','-r','--name-only',rev).splitlines()
+          topics={
+            'gateway':r'gateway|websocket|connection|handshake|connect',
+            'protocol':r'packet|protocol|frame|decode|encode',
+            'reliability':r'sendack|recvack|retry|dedup|idempot|messageseq|messageid',
+            'storage':r'appendmessage|persist|pebble|store|storage|commitlog',
+            'cluster':r'raft|replica|leader|slot|shard|election',
+            'sync':r'syncmessage|offline|cursor|conversation|unread',
+            'security':r'authenticate|authorize|token|permission|tls',
+          }
+          out=['# WuKongIM static architecture evidence','',f'Revision: {rev}','',
+               'Static candidate index only. Function names and tests are not proof of runtime guarantees.','']
+          counts=collections.Counter('/'.join(f.split('/')[:2]) for f in files if f.endswith('.go'))
+          out+=['## Go package inventory','']+[f'- {p}: {n} files' for p,n in counts.most_common(100)]
+          for topic,pattern in topics.items():
+              rx=re.compile(pattern,re.I)
+              out+=['',f'## {topic}','']
+              candidates=[]
+              for f in files:
+                  if not f.endswith(('.go','.proto')) or '/vendor/' in '/'+f: continue
+                  if not rx.search(f): continue
+                  candidates.append(f)
+              out += [f'- Candidate files: {len(candidates)}']
+              for f in candidates[:90]:
+                  src=git('show',f'{rev}:{f}')
+                  out.append(f'### [{f}](https://github.com/WuKongIM/WuKongIM/blob/{rev}/{f})')
+                  for i,line in enumerate(src.splitlines(),1):
+                      if re.match(r'^(func |type |service |message )',line) and (rx.search(line) or f.endswith('_test.go')):
+                          out.append(f'- L{i}: `{line.strip()[:250]}`')
+              if not candidates: out.append('- No path match; manual search required.')
+          pathlib.Path('reports/wukong-architecture-evidence.md').write_text('\n'.join(out))
+          pathlib.Path('reports/revision.txt').write_text(rev+'\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wukong-architecture-evidence
+          path: reports/
+          retention-days: 30
