@@ -1,0 +1,98 @@
+name: Phase 6B real message exchange
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/real-message-exchange.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  exchange:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {index: 0, repo: WuKongIM/WuKongIM, label: wukong}
+          - {index: 1, repo: juggleim/im-server, label: juggle}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: evidence-${{ matrix.index }}
+          run-id: 45753958632
+          github-token: ${{ github.token }}
+          path: baseline
+      - name: Fetch exact public source
+        env:
+          REPO: ${{ matrix.repo }}
+        run: |
+          set -euo pipefail
+          test "$(cat baseline/source.txt)" = "https://github.com/$REPO"
+          rev=$(cat baseline/revision.txt)
+          [[ "$rev" =~ ^[0-9a-f]{40}$ ]]
+          git init upstream
+          git -C upstream remote add origin "https://github.com/$REPO.git"
+          git -C upstream fetch --depth=1 origin "$rev"
+          git -C upstream checkout --detach FETCH_HEAD
+          mkdir -p reports
+          printf '%s\n' "$rev" > reports/revision.txt
+          lscpu > reports/cpu.txt
+          free -m > reports/memory.txt
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: upstream/go.mod
+          cache: false
+      - name: Actual cross-node protocol exchange
+        if: matrix.label == 'wukong'
+        working-directory: upstream
+        run: |
+          set -euo pipefail
+          go test -tags=e2e -count=1 -timeout=20m -json ./test/e2e/message/cross_node_delivery -run '^TestThreeNodeClusterCrossNodeUsersExchangeMessages$' | tee ../reports/exchange.jsonl
+          python3 - <<'PY'
+          import json
+          rows=[json.loads(l) for l in open('../reports/exchange.jsonl')]
+          assert any(r.get('Test')=='TestThreeNodeClusterCrossNodeUsersExchangeMessages' and r.get('Action')=='pass' for r in rows), 'required actual test did not pass'
+          PY
+      - name: Actual authenticated WebSocket private and group workloads
+        if: matrix.label == 'juggle'
+        working-directory: upstream
+        env:
+          BENCH_CLIENTS: '4'
+          BENCH_RATE: '4'
+          BENCH_GROUP_SENDERS: '2'
+          BENCH_WARMUP: '3s'
+          BENCH_DURATION: '10s'
+          BENCH_DELIVERY_GRACE: '5s'
+          BENCH_OUTPUT_DIR: '../reports'
+        run: |
+          set -euo pipefail
+          # Bind upstream published ports to loopback on the disposable runner.
+          python3 - <<'PY'
+          import pathlib,re
+          p=pathlib.Path('docker-compose.yml')
+          s=p.read_text()
+          s=re.sub(r'(?m)^(\s*-\s*")(?=\$\{[A-Z_]+:-\d+\}:\d+")',r'\g<1>127.0.0.1:',s)
+          p.write_text(s)
+          PY
+          docker compose config --format json | python3 -c 'import json,sys; c=json.load(sys.stdin); assert all(p.get("host_ip")=="127.0.0.1" for s in c["services"].values() for p in s.get("ports",[]))'
+          bash scripts/run-benchmark.sh all
+          python3 - <<'PY'
+          import pathlib,json
+          for scenario in ['private','group']:
+              paths=list(pathlib.Path('../reports').glob('*-'+scenario+'.json'))
+              assert len(paths)==1,scenario
+              assert json.loads(paths[0].read_text()),scenario
+          PY
+          echo 'Report existence checked; delivery counters require review before acceptance.' > ../reports/acceptance.txt
+      - name: Cleanup
+        if: always() && matrix.label == 'juggle'
+        working-directory: upstream
+        run: docker compose down -v --remove-orphans || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: real-exchange-${{ matrix.label }}
+          path: reports/
+          retention-days: 30
