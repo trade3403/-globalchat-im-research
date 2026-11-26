@@ -18,6 +18,7 @@ Global communication infrastructure and vertical application source-code vendor.
 | BIZ-10 | Shared modules | | Wallet, metering, settlement and reusable services |
 | BIZ-11 | Compliance | | Region-specific payments, safety, privacy, age checks |
 | BIZ-12 | Strategy | | Differentiation, delivery costs, pilot customers |
+| BIZ-13 | Admin demo capability | User-provided 66demo admin demo | UI-observed feature inventory and inferred logical data model. Product identity, database schema and commercial claims unverified. See [report](admin-demo-capabilities.md) |
 
 ## Vertical portfolio
 P0 candidates: paid one-to-one video/text/voice; paid communities. P1 candidates: voice rooms, dating, expert consultation, enterprise messaging, customer support. P2 candidates: live streaming, education, social commerce, secure messaging, AI social. Twelve verticals total (paid text/voice belongs to paid one-to-one).
