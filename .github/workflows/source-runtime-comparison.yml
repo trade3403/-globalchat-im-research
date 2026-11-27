@@ -52,7 +52,20 @@ jobs:
           RESULT: ${{ steps.exercise.outcome }}
         run: |
           printf '| Product | Build and runtime assertions |\n|---|---|\n| %s | %s |\n' "$PRODUCT" "$RESULT" >> "$GITHUB_STEP_SUMMARY"
+          cd reports/runtime
+          if test -f private-history.json; then
+            jq -c . private-history.json | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          if test -f exchange.jsonl; then
+            jq -c 'select(.Test and (.Action == "pass" or .Action == "fail")) | {Test,Action,Elapsed}' exchange.jsonl | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          for file in *-private.json *-group.json; do
+            if test -f "$file"; then
+              jq -c '{scenario:.workload.scenario,connections,message_acknowledgements,deliveries}' "$file" | tee -a "$GITHUB_STEP_SUMMARY"
+            fi
+          done
       - uses: actions/upload-artifact@v4
+        continue-on-error: true
         if: always()
         with:
           name: source-runtime-${{ matrix.name }}

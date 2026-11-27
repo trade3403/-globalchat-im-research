@@ -1,5 +1,6 @@
 """Exercise OpenIM using two synthetic users and the recipient's history API."""
 
+import base64
 import json
 import os
 from pathlib import Path
@@ -21,7 +22,7 @@ def post(route, body, token=None):
     with urllib.request.urlopen(request, timeout=5) as response:
         result = json.load(response)
     if result.get("errCode") != 0:
-        raise ValueError(f"{route}: OpenIM error {result.get('errCode')}")
+        raise ValueError(f"{route}: OpenIM error {result.get('errCode')} {result.get('errMsg')} {result.get('errDlt')}")
     return result.get("data") or {}
 
 
@@ -41,7 +42,7 @@ def ready_admin():
 
 def main():
     admin = ready_admin()
-    sender, receiver = "ci-alice", "ci-bob"
+    sender, receiver = "cialice", "cibob"
     post("/user/user_register", {"users": [
         {"userID": user, "nickname": user} for user in (sender, receiver)
     ]}, admin)
@@ -63,7 +64,6 @@ def main():
             if not isinstance(content, str):
                 content = bytes(content).decode()
             elif marker not in content:
-                import base64
                 try:
                     content = base64.b64decode(content).decode()
                 except (ValueError, UnicodeError):
