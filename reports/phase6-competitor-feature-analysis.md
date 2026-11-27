@@ -178,7 +178,23 @@ GlobalChat 一侧采用仓库中的 Phase 5 初步源码审计作为证据，观
 - 菜单项和配置字段只说明后台 UI 有相应入口或表单。它们不能单独证明功能已端到端实现。
 - 竞品演示数据中的个人信息和凭据不在本文中复述。
 
-## 8. 下一步验证
+## 8. 既有 CI 进度核查（2026-11-27）
+
+检查了 Phase 5 引用的三组 GitHub Actions 运行及其 job/artifact 元数据：
+
+| 运行 | Run ID | Job 结论 | 证据包 |
+|---|---:|---|---|
+| WuKongIM 架构证据采集 | 45754075534 | completed / success | wukong-architecture-evidence，artifact 15086474711，SHA-256 82ac695103f294fb76b633c3cb70381db86eddeef05fc3d0d6ec8c0e2c91e365 |
+| JuggleIM 源码证据采集 | 45754148331 | 3 个 job 均 completed / success | juggle-console-evidence，15087106708；juggle-im-server-evidence，15086648561；juggle-business-server-evidence，15086533073 |
+| OpenIM 源码证据采集 | 45754202161 | 2 个 job 均 completed / success | openim-sdk-core-evidence，15087066945；openim-server-evidence，15086747125 |
+
+证据包当时显示未过期，保留截止时间为 2026-12-26。工作流定义表明这些 job 获取固定版本源码并生成文件清单、许可证路径/内容及关键词命中证据，不执行上游源码。其用途是静态源码盘点，不是端到端功能验证、性能测试或竞品功能证明。
+
+仓库中的 globalchat-gap-review.yml 配置了下载上述三组证据并校验 revision/报告一致性的 Phase 5 review 流程。此次核查确认了 workflow 定义和三组上游 evidence job/artifact 状态，没有找到该 review workflow 本身的运行元数据，因此不把 review workflow 标记为已通过。
+
+JuggleIM/OpenIM/WuKongIM 的证据只能说明研究仓库中已有静态源码采集基础。当前竞品 UI 对比报告所用的 GlobalChat 自身实现证据，仍以 phase5-globalchat-gap.md 的有限抽样源码审计为准。
+
+## 9. 下一步验证
 
 1. 对 GlobalChat 仓库做完整模块/路由/API/测试清点，区分已实现、部分实现和未查。
 2. 对演示站选取关键流程做无副作用验证，例如普通用户注册配置、群管理页面、举报列表、钱包流水视图、客户端草稿预览；需要审批或会改变数据的动作不做。
