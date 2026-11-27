@@ -39,8 +39,8 @@ assert s.count(bad) == 1
 p.write_text(s.replace(bad, bad[1:]))
 PY
     git diff -- docker-compose.yml sql/imserver.sql > "$reports/fixture.patch"
-    export BENCH_CLIENTS=4 BENCH_RATE=4 BENCH_GROUP_SENDERS=2
-    export BENCH_WARMUP=3s BENCH_DURATION=10s BENCH_DELIVERY_GRACE=5s
+    export BENCH_CLIENTS=20 BENCH_RATE=40 BENCH_GROUP_SENDERS=4
+    export BENCH_WARMUP=5s BENCH_DURATION=20s BENCH_DELIVERY_GRACE=10s
     export BENCH_OUTPUT_DIR="$reports"
     docker compose config --format json | jq -e 'all(.services[].ports[]?; .host_ip == "127.0.0.1")'
     bash scripts/run-benchmark.sh all

@@ -47,35 +47,81 @@ def main():
         {"userID": user, "nickname": user} for user in (sender, receiver)
     ]}, admin)
     receiver_token = post("/auth/get_user_token", {"userID": receiver, "platformID": 5}, admin)["token"]
-    marker = f"source-ci-{time.time_ns()}"
-    post("/msg/send_msg", {
-        "sendID": sender, "recvID": receiver, "senderNickname": sender,
-        "sessionType": 1, "contentType": 101, "content": {"content": marker},
-    }, admin)
     conversation = f"si_{sender}_{receiver}"
-    for _ in range(30):
+    sent = []
+    latencies_ms = []
+    for index in range(50):
+        marker = f"source-ci-{time.time_ns()}-{index}"
+        started = time.perf_counter()
+        post("/msg/send_msg", {
+            "sendID": sender, "recvID": receiver, "senderNickname": sender,
+            "sessionType": 1, "contentType": 101, "content": {"content": marker},
+        }, admin)
+        latencies_ms.append((time.perf_counter() - started) * 1000)
+        sent.append(marker)
+
+    # A receiver token must not be allowed to pull another user's conversation.
+    try:
+        post("/msg/pull_msg_by_seq", {
+            "userID": sender,
+            "seqRanges": [{"conversationID": conversation, "begin": 1, "end": 100, "num": 100}],
+        }, receiver_token)
+    except (urllib.error.HTTPError, ValueError):
+        unauthorized_read_rejected = True
+    else:
+        raise AssertionError("receiver token could read another user's message history")
+
+    deadline = time.monotonic() + 45
+    received = set()
+    occurrence_count = {}
+    last_seq = 0
+    while time.monotonic() < deadline and len(received) < len(sent):
         data = post("/msg/pull_msg_by_seq", {
             "userID": receiver,
-            "seqRanges": [{"conversationID": conversation, "begin": 1, "end": 16, "num": 16}],
+            "seqRanges": [{"conversationID": conversation, "begin": 1, "end": 256, "num": 256}],
         }, receiver_token)
         messages = data.get("msgs", {}).get(conversation, {})
         for message in messages.get("Msgs", messages.get("msgs", [])):
             content = message.get("content", "")
             if not isinstance(content, str):
                 content = bytes(content).decode()
-            elif marker not in content:
+            try:
+                decoded = json.loads(content)
+            except (ValueError, TypeError):
                 try:
-                    content = base64.b64decode(content).decode()
+                    decoded = json.loads(base64.b64decode(content).decode())
                 except (ValueError, UnicodeError):
                     continue
-            if marker in content:
-                (REPORTS / "private-history.json").write_text(json.dumps({
-                    "assertion": "recipient history contains sent private message",
-                    "conversation": conversation, "seq": message.get("seq"),
-                }) + "\n")
-                return
-        time.sleep(1)
-    raise AssertionError("recipient history never contained the sent message")
+            text = decoded.get("content", "")
+            if text in sent:
+                occurrence_count[text] = occurrence_count.get(text, 0) + 1
+                received.add(text)
+                last_seq = max(last_seq, int(message.get("seq", 0)))
+        if len(received) < len(sent):
+            time.sleep(1)
+
+    missing = sorted(set(sent) - received)
+    if missing:
+        raise AssertionError(f"recipient history missed {len(missing)} of {len(sent)} messages")
+    latencies_ms.sort()
+    percentile = lambda q: latencies_ms[min(len(latencies_ms)-1, int((len(latencies_ms)-1)*q))]
+    result = {
+        "assertion": "50 private messages persisted and were readable by recipient",
+        "sent": len(sent),
+        "received_unique": len(received),
+        "missing": len(missing),
+        "duplicate_count_in_history": sum(count - 1 for count in occurrence_count.values() if count > 1),
+        "unauthorized_history_read_rejected": unauthorized_read_rejected,
+        "send_rest_latency_ms": {
+            "p50": round(percentile(.50), 3),
+            "p95": round(percentile(.95), 3),
+            "p99": round(percentile(.99), 3),
+        },
+        "last_sequence": last_seq,
+        "note": "REST request latency is not WebSocket end-to-end delivery latency.",
+    }
+    (REPORTS / "private-history.json").write_text(json.dumps(result, indent=2) + "\n")
+
 
 
 if __name__ == "__main__":

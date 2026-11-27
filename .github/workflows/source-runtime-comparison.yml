@@ -45,6 +45,15 @@ jobs:
         id: exercise
         working-directory: upstream
         run: bash ../scripts/im-source-runtime.sh ${{ matrix.name }}
+      - name: WuKongIM replica and throughput profile
+        if: matrix.name == 'wukong'
+        working-directory: upstream
+        env:
+          WK_E2E_REPLICA_LOAD_COMPARISON: '1'
+        run: |
+          set -euo pipefail
+          go test -tags=e2e -count=1 -timeout=25m -json ./test/e2e/message/cross_node_delivery             -run '^TestThreeNodeReplicaLoadComparisonAtTwoThousandQPS$' | tee ../reports/runtime/wukong-load.jsonl
+          jq -se 'any(.[]; .Test == "TestThreeNodeReplicaLoadComparisonAtTwoThousandQPS" and .Action == "pass")' ../reports/runtime/wukong-load.jsonl
       - name: Publish job status
         if: always()
         env:
@@ -58,6 +67,9 @@ jobs:
           fi
           if test -f exchange.jsonl; then
             jq -c 'select(.Test and (.Action == "pass" or .Action == "fail")) | {Test,Action,Elapsed}' exchange.jsonl | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+          if test -f wukong-load.jsonl; then
+            jq -c 'select(.Test and (.Action == "pass" or .Action == "fail")) | {Test,Action,Elapsed,Output}' wukong-load.jsonl | tee -a "$GITHUB_STEP_SUMMARY"
           fi
           for file in *-private.json *-group.json; do
             if test -f "$file"; then
