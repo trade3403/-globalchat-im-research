@@ -1,0 +1,60 @@
+name: IM source and runtime comparison
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/source-runtime-comparison.yml'
+      - 'scripts/im-source-runtime.*'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {name: wukong, repo: WuKongIM/WuKongIM, sha: 21d905a328bb7141167bc6dbe20fdb65588e0420}
+          - {name: juggle, repo: juggleim/im-server, sha: 0a47433c1aed6f08b48a3bfcf6b80dfe0a55a6c4}
+          - {name: openim, repo: openimsdk/open-im-server, sha: a101d85ec16cc21bec60005169725adc1ae5649a}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Fetch pinned source and record runner
+        env:
+          REPO: ${{ matrix.repo }}
+          REV: ${{ matrix.sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p reports/runtime
+          printf '%s %s\n' "$REPO" "$REV" > reports/runtime/source.txt
+          lscpu > reports/runtime/cpu.txt
+          free -m > reports/runtime/memory.txt
+          git init -q upstream
+          git -C upstream fetch -q --depth=1 "https://github.com/$REPO.git" "$REV"
+          git -C upstream checkout -q --detach FETCH_HEAD
+          test "$(git -C upstream rev-parse HEAD)" = "$REV"
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: upstream/go.mod
+          cache: false
+      - name: Build and exercise pinned source
+        id: exercise
+        working-directory: upstream
+        run: bash ../scripts/im-source-runtime.sh ${{ matrix.name }}
+      - name: Publish job status
+        if: always()
+        env:
+          PRODUCT: ${{ matrix.name }}
+          RESULT: ${{ steps.exercise.outcome }}
+        run: |
+          printf '| Product | Build and runtime assertions |\n|---|---|\n| %s | %s |\n' "$PRODUCT" "$RESULT" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: source-runtime-${{ matrix.name }}
+          path: reports/runtime/
+          retention-days: 30
