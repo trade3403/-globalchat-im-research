@@ -13,3 +13,9 @@ CI 首轮只采集公开源码的版本、文件清单、许可证与关键字�
 ## 源码构建与运行验证
 
 [Phase 7 源码对比、CI 矩阵与任务计划](reports/phase7-im-source-ci-comparison.md) · [运行记录](https://github.com/trade3403/-globalchat-im-research/actions/workflows/source-runtime-comparison.yml)
+
+## 并发与性能实测（Phase 6C）
+
+[三家 IM 容量、延迟、失败根因及后续记录规范](reports/phase6c-im-capacity-analysis.md)。包含已实测指标、未验证范围、1万/3万/5万阶梯测试、GlobalChat Rust 建议验收目标。每轮完成后须更新 Git 报告，保留失败证据及原始 CI 链接。
+
+[悟空 IM / JuggleIM 阶梯 CI](https://github.com/trade3403/-globalchat-im-research/actions/workflows/connection-ladder.yml) · [OpenIM 阶梯 CI](https://github.com/trade3403/-globalchat-im-research/actions/workflows/openim-connection-ladder.yml)
