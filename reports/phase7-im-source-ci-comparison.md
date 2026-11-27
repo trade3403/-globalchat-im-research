@@ -31,6 +31,32 @@ JuggleIM 的固定版本中，`sql/imserver.sql` 有一个多余的 `+CREATE TAB
 
 Phase 7 成功运行：[run 46011555775](https://github.com/trade3403/-globalchat-im-research/actions/runs/46011555775)。首轮 OpenIM 测试使用了协议不接受的用户 ID，修正后通过。另有首轮 artifact upload 报错，原因是 GitHub Actions artifact storage quota exceeded，即 Actions 产物存储配额耗尽，未能上传报告；不是 Runner 磁盘满。最终轮上传成功。\n\n历史证据：[冒烟](https://github.com/trade3403/-globalchat-im-research/actions/runs/45772497250) · [跨节点和 JuggleIM 诊断](https://github.com/trade3403/-globalchat-im-research/actions/runs/45782768181)。新版运行：[Phase 7 Actions](https://github.com/trade3403/-globalchat-im-research/actions/workflows/source-runtime-comparison.yml)。
 
+## 三家优势结论与 GlobalChat 学习路线
+
+### 优势总结
+
+| 项目 | 最强项 | 从源码和本轮测试能确认什么 | 学习价值 |
+|---|---|---|---|
+| 悟空 IM | 消息引擎、频道模型和集群投递 | 频道追加与在线投递有独立契约和路由边界；三节点跨节点消息用例通过。产品账号、好友和业务权限交给上层系统。 | 学习提交确认、追加后投递、节点路由和跨节点验收方式。 |
+| JuggleIM | 消息核心周边的业务服务和管理运营 | 多租户上下文沿 API、内部调用和消息路径传递；独立业务服务包含好友、群组和账号，控制台管理应用、消息及集成。本轮单机 Compose 私聊和群聊场景通过，但测试环境需要临时修复初始化 SQL。 | 学习租户边界、业务层拆分、运营台和集成配置如何围绕实际运营角色组织。 |
+| OpenIM | 服务端与跨平台 SDK 配套、序号同步 | 服务端按会话序号提供历史拉取；SDK 的 MsgSyncer 比对本地与服务端序号并补拉消息。本轮源码构建及 REST 私聊历史闭环通过。 | 学习客户端同步器、持久化游标、缺失区间拉取和多端 SDK 接口组织。 |
+
+### 结合 GlobalChat 当前状态
+
+GlobalChat 的现有记录区分 Matrix/Tuwunel 主线与独立 Rust IM 实验线。Rust 实验已有账号、私聊/群聊原型、WebSocket、ACK、水位与离线恢复测试；历史实验也有 5000 长连接测试。与此同时，客户端适配、安全门槛和生产部署状态与这些本机实验结果分开记录。uni-app 同机 Runner 私聊接口联测已通过，但 H5 真浏览器、公网和 Android 实机仍未完成验收。[服务器进度与测试边界](https://github.com/trade3403/wechat/blob/main/docs/native-rust-server-status.md) · [uni-app 对接进度](https://github.com/trade3403/wechat/blob/main/docs/uniapp-native-server-progress.md)
+
+### 学习顺序
+
+| 顺序 | 学习主题 | 参考对象 | 对应 GlobalChat 现有任务 | 建议验收 |
+|---|---|---|---|---|
+| 1 | 统一消息正确性矩阵，核对客户端消息 ID、服务端序号、ACK、收件事件、离线补齐、重复与乱序 | 三家共同可比较；重点参考 WuKongIM 的跨节点 E2E 和 OpenIM 的序号拉取 | IM-CI-05、NATIVE-03、NATIVE-04、INT-01 | 固定双账号和消息集合，逐条按 ID/序号核验发送、接收、重连补齐和去重。先让当前 GlobalChat 适配链路跑完。 |
+| 2 | 消息追加与投递边界、跨节点路由及失败分类 | WuKongIM | SCALE-01–05、HA-02/04 | 单节点正确性通过后，在隔离多节点环境测跨节点投递、节点断开后的重试和恢复；明确哪些 ACK 表示服务端接收、哪些表示设备确认。 |
+| 3 | 租户、业务层与运营控制面 | JuggleIM | NATIVE-02/07、DEPLOY-04、COMP-06 | 先写出租户数据隔离和越权负面用例，再决定是否需要抽独立业务服务与管理界面。 |
+| 4 | SDK 本地存储和游标同步 | OpenIM | INT-01、NATIVE-04、COMP-05 | uni-app/Flutter 客户端断线、重启、切换设备后，以持久游标补拉并验证重复消息抑制。 |
+| 5 | 跨项目性能对比 | 三家 | IM-CI-06 | 先统一语义、消息数、消息大小、拓扑和 Runner 配额，再公布 ACK/接收延迟分位数、吞吐、CPU 和内存；当前 CI 场景不做性能排名。 |
+
+本表是研究建议，不表示 GlobalChat 产品路线已经批准或相关开发已经开始。当前完成的是竞品源码分析和各自独立的基础 CI 验证。与 GlobalChat 的同口径端到端验证尚未完成。后续如要执行产品侧改动，应按上表验收目标另行实施，本报告本身不更改 GlobalChat 产品仓库。
+
 ## 任务计划表
 
 | 编号 | 任务 | 验收产物 | 状态 |
