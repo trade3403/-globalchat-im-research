@@ -57,7 +57,8 @@ def main():
             "userID": receiver,
             "seqRanges": [{"conversationID": conversation, "begin": 1, "end": 16, "num": 16}],
         }, receiver_token)
-        for message in data.get("msgs", {}).get(conversation, {}).get("msgs", []):
+        messages = data.get("msgs", {}).get(conversation, {})
+        for message in messages.get("Msgs", messages.get("msgs", [])):
             content = message.get("content", "")
             if not isinstance(content, str):
                 content = bytes(content).decode()
