@@ -13,6 +13,12 @@
 
 源码：[悟空 IM](https://github.com/WuKongIM/WuKongIM/tree/21d905a328bb7141167bc6dbe20fdb65588e0420) · [JuggleIM](https://github.com/juggleim/im-server/tree/0a47433c1aed6f08b48a3bfcf6b80dfe0a55a6c4) · [OpenIM Server](https://github.com/openimsdk/open-im-server/tree/a101d85ec16cc21bec60005169725adc1ae5649a) · [OpenIM SDK](https://github.com/openimsdk/openim-sdk-core/tree/5c9670c7fe9a2d5993f5ef6964852d391470f40f)
 
+### 消息链路中的差异
+
+- **悟空 IM**：入口将发送命令交给频道追加路由；提交后才生成供收件人规划使用的消息封装。在线投递又把接受、可重试和丢弃分别记录，因此发送端确认和接收端投递可分开观察。
+- **JuggleIM**：WebSocket 帧进入连接管理器，内部调用保留 `app_key`。私聊路径在分发前应用黑名单、好友规则和拦截器，再记录发送箱和历史。上游压测分别记录服务端 ACK 和收件端回调，回调统计无法直接推导未收到的消息数。
+- **OpenIM**：服务端 REST 入口把消息交给消息 RPC，接收者可按会话序号查询历史。客户端 SDK 的 `MsgSyncer` 维护本地序号，在建立连接或处理推送时比较本地与目标序号，并拉取缺失区间。本次 REST 测试覆盖服务端序号拉取，SDK 重连和本地库仍待单独实测。
+
 ## CI 分析表
 
 | 项目 | 历史实测 | Phase 7 构建与测试 | 通过条件 | 产物 |
