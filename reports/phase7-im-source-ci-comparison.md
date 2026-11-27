@@ -23,21 +23,21 @@
 
 | 项目 | 历史实测 | Phase 7 构建与测试 | 通过条件 | 产物 |
 |---|---|---|---|---|
-| 悟空 IM | 两次跨节点收发通过 | 从固定源码编译并运行官方三节点 E2E 测试 | 指定跨节点测试实际执行且产生 Go JSON 的 pass 事件 | `exchange.jsonl` |
-| JuggleIM | 冒烟通过；两次收发任务在就绪环节失败 | Compose 本地构建 IM 服务，使用上游脚本登录并运行 WebSocket 私聊和群聊 | 两个场景均有成功连接、ACK 与接收回调，连接和 ACK 无记录失败；接收回调计数存在，未逐条核对预期收件人 | 两个场景的 JSON、容器状态、日志和补丁 |
-| OpenIM | Compose 启动步骤成功，当时未验证 API 就绪 | 从 `./cmd` 编译；Compose 启动 MongoDB、Redis 和 MinIO；独立进程使用 Redis 队列 | 管理鉴权成功、创建两个用户、发送私聊后，以接收方身份读回唯一测试消息 | `private-history.json`、服务日志、容器状态和补丁 |
+| 悟空 IM | 两次跨节点收发通过 | run 46011555775 的官方三节点 E2E 实际通过 | 跨节点收发测试通过 | Actions 摘要含 Go JSON pass 事件。GitHub artifact 配额耗尽导致首轮上传失败，最终通过轮产物上传成功 |
+| JuggleIM | 冒烟通过；前两轮收发测试未就绪 | run 46011555775 的临时 Compose 栈和私聊、群聊 JSON 断言均通过 | 本地私聊、群聊的连接与 ACK 场景通过，接收统计未逐条核对每个预期收件人 | 私聊/群聊报告、容器状态、日志和临时 SQL 修复补丁 |
+| OpenIM | 首轮仅确认 Compose 启动步骤 | run 46011555775 从源码编译，管理员鉴权、注册测试用户、发送私聊及接收方历史拉取均通过 | 接收方能从按会话序号查询的历史接口读回刚发送的唯一消息 | 私聊历史 JSON、服务日志、容器状态和运行配置补丁 |
 
-JuggleIM 的固定版本中，`sql/imserver.sql` 有一个多余的 `+CREATE TABLE`，使 MySQL 在写入最终初始化版本标记前中断。后续自动迁移会碰到已存在的 `is_portion`。本次 CI 只在临时副本去掉该字符，保留原始源码版本和补丁；通过后结果也应标为“修复测试环境后通过”。
+JuggleIM 的固定版本中，`sql/imserver.sql` 有一个多余的 `+CREATE TABLE`，使 MySQL 在写入最终初始化版本标记前中断。后续自动迁移会碰到已存在的 `is_portion`。Phase 7 只在 Runner 的临时源码副本去掉该字符并保存补丁，未改上游源码。该轮结果应视为“修复测试环境后通过”。
 
-历史证据：[冒烟](https://github.com/trade3403/-globalchat-im-research/actions/runs/45772497250) · [跨节点和 JuggleIM 诊断](https://github.com/trade3403/-globalchat-im-research/actions/runs/45782768181)。新版运行：[Phase 7 Actions](https://github.com/trade3403/-globalchat-im-research/actions/workflows/source-runtime-comparison.yml)。
+Phase 7 成功运行：[run 46011555775](https://github.com/trade3403/-globalchat-im-research/actions/runs/46011555775)。首轮 OpenIM 测试使用了协议不接受的用户 ID，修正后通过。另有首轮 artifact upload 报错，原因是 GitHub Actions artifact storage quota exceeded，即 Actions 产物存储配额耗尽，未能上传报告；不是 Runner 磁盘满。最终轮上传成功。\n\n历史证据：[冒烟](https://github.com/trade3403/-globalchat-im-research/actions/runs/45772497250) · [跨节点和 JuggleIM 诊断](https://github.com/trade3403/-globalchat-im-research/actions/runs/45782768181)。新版运行：[Phase 7 Actions](https://github.com/trade3403/-globalchat-im-research/actions/workflows/source-runtime-comparison.yml)。
 
 ## 任务计划表
 
 | 编号 | 任务 | 验收产物 | 状态 |
 |---|---|---|---|
 | IM-CI-01 | 固定四个源码版本，追踪消息追加、投递和同步路径 | 本文源码表与上游链接 | 完成 |
-| IM-CI-02 | 在 Runner 复测悟空 IM 三节点收发 | 官方 E2E 的通过事件 | 已提交，结果见 Actions |
-| IM-CI-03 | 复测 JuggleIM 数据库新装和私聊、群聊 | 可审阅的临时修补、ACK 和回调报告 | 已提交，结果见 Actions |
-| IM-CI-04 | 从源码构建 OpenIM，并验证私聊历史 | 接收方读回私聊的 JSON 证据 | 已提交，结果见 Actions |
+| IM-CI-02 | 在 Runner 复测悟空 IM 三节点收发 | 官方 E2E 的通过事件 | 完成，run 46011555775 通过 |
+| IM-CI-03 | 复测 JuggleIM 数据库新装和私聊、群聊 | 可审阅的临时修补、ACK 和回调报告 | 完成，临时修补后通过 run 46011555775 |
+| IM-CI-04 | 从源码构建 OpenIM，并验证私聊历史 | 接收方读回私聊的 JSON 证据 | 完成，run 46011555775 通过 |
 | IM-CI-05 | 建立三家统一的消息正确性场景 | 相同账号数、消息数与正文长度；按消息 ID 和设备核对丢失、重复、顺序、断线补齐 | 待实现 |
 | IM-CI-06 | 比较三家性能 | 固定 Runner 规格、拓扑与负载，记录发送 ACK 和接收延迟 P50/P95/P99、吞吐、CPU、内存 | 依赖 IM-CI-05 |
