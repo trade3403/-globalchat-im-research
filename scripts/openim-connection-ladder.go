@@ -38,10 +38,15 @@ func post(path string, body any, token string) (map[string]any,error) {
  req.Header.Set("Content-Type","application/json"); req.Header.Set("operationID",strconv.FormatInt(time.Now().UnixNano(),10))
  if token!="" {req.Header.Set("token",token)}
  res,e:=httpClient.Do(req); if e!=nil{return nil,e}; defer res.Body.Close()
- var v struct{ErrCode int; Data map[string]any}
- if e=json.NewDecoder(io.LimitReader(res.Body,4<<20)).Decode(&v); e!=nil{return nil,e}
- if res.StatusCode!=200||v.ErrCode!=0{return nil,fmt.Errorf("%s status=%d code=%d",path,res.StatusCode,v.ErrCode)}
- return v.Data,nil
+ var v struct{ErrCode *int; Data json.RawMessage}
+ if e=json.NewDecoder(io.LimitReader(res.Body,4<<20)).Decode(&v); e!=nil{return nil,fmt.Errorf("%s response decode failed: %T",path,e)}
+ if res.StatusCode!=200{return nil,fmt.Errorf("%s HTTP status=%d",path,res.StatusCode)}
+ if v.ErrCode==nil{return nil,fmt.Errorf("%s missing errCode",path)}
+ if *v.ErrCode!=0{return nil,fmt.Errorf("%s business code=%d",path,*v.ErrCode)}
+ if path!="/auth/get_admin_token" && path!="/auth/get_user_token" {return nil,nil}
+ var data map[string]any
+ if err:=json.Unmarshal(v.Data,&data);err!=nil{return nil,fmt.Errorf("%s invalid token response data",path)}
+ return data,nil
 }
 func token(v map[string]any) string {s,_:=v["token"].(string);return s}
 func snapshot() map[string]any {
@@ -55,7 +60,7 @@ func worker(id,admin string,done <-chan struct{}, ready *sync.WaitGroup, lifetim
  completed:=false
  defer func(){if !completed{ready.Done()}}()
  d,e:=post("/auth/get_user_token",map[string]any{"userID":id,"platformID":5},admin)
- if e!=nil||token(d)==""{failed.Add(1);recordError("user_token");return}
+ if e!=nil||token(d)==""{failed.Add(1);recordError("user_token");if failed.Load()<=3{fmt.Println("user token failed",e)};return}
  q:=url.Values{"sendID":{id},"token":{token(d)},"platformID":{"5"},"operationID":{id},"isBackground":{"false"},"isMsgResp":{"true"},"sdkType":{"js"}}
  dialer:=websocket.Dialer{HandshakeTimeout:15*time.Second}
  begin:=time.Now()
@@ -106,8 +111,8 @@ func run() int {
  for i:=0;i<90;i++{d,e:=post("/auth/get_admin_token",map[string]any{"secret":secret,"userID":"imAdmin"},"");if e==nil{admin=token(d);if admin!=""{break}};time.Sleep(2*time.Second)}
  if admin==""{recordError("server_not_ready");writeJSON("result.json",snapshot());return 1}
  ids:=make([]string,n)
- for i:=range ids{ids[i]=fmt.Sprintf("capacity-%06d",i)}
- for i:=0;i<n;i+=200{end:=min(i+200,n);users:=make([]map[string]string,0,end-i);for _,id:=range ids[i:end]{users=append(users,map[string]string{"userID":id,"nickname":id})};if _,e:=post("/user/user_register",map[string]any{"users":users},admin);e!=nil{recordError("register_batch");writeJSON("result.json",snapshot());fmt.Println("registration failed",i);return 1}}
+ for i:=range ids{ids[i]=fmt.Sprintf("capacity%06d",i)}
+ for i:=0;i<n;i+=200{end:=min(i+200,n);users:=make([]map[string]string,0,end-i);for _,id:=range ids[i:end]{users=append(users,map[string]string{"userID":id,"nickname":id})};if _,e:=post("/user/user_register",map[string]any{"users":users},admin);e!=nil{recordError("register_batch");writeJSON("result.json",snapshot());fmt.Println("registration failed",i,e);return 1}}
  fmt.Println("registered",n)
  done:=make(chan struct{});defer close(done)
  var life sync.WaitGroup
