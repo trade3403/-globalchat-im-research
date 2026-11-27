@@ -196,3 +196,22 @@ OpenIM 新客户端按真实账号、Token、WebSocket 鉴权响应、心跳和�
 | P2 | 10万连接及GlobalChat Rust对照 | 独立负载机与服务端；重复试验；不得由低负载或配置上限外推 |
 
 GlobalChat 可参考 WuKongIM 的提交/投递边界及副本成本，JuggleIM 的业务层与租户边界，OpenIM 的序号游标与多端同步。三个系统尚无公平的容量排名；GlobalChat 没有加入本轮实测，不能宣称性能领先。此次为报告更新，不修改测试代码、不启动新的测试，也未建立自动写回机制。
+
+
+## 9. Phase 6D：协议预检与启动稳定性修复（已提交，待验收）
+
+本阶段不宣称新的容量通过结果；先解决第8节的阻断，再恢复1万、3万、5万连接梯度。
+
+| 对象 | 修正措施 | 本轮验收 |
+|---|---|---|
+| WuKongIM | 根据上游 cloud-small.yaml 与 bench token 测试，将模拟器 token_mode 从 none 改为 bench_api，使用真实 token 准备路径，不取消服务端鉴权 | 1000 个活跃连接、7次连续采样、有效消息流量且无新增收发错误 |
+| JuggleIM | MySQL 健康检查改为 TCP 查询最终 jimdb_version=20261103，避免临时初始化实例被判为已就绪；保留关闭 IM 自动重启、pipefail、Docker events、退出状态及资源日志 | 12000 次真实认证连接和60秒私聊测量；仍需独立验证稳定在线数 |
+| OpenIM | 合成用户 ID 改为纯字母数字；API 响应先以 RawMessage 解析，非 token 接口不强制 data 为对象；保留 HTTP/业务错误码 | 20个真实鉴权 WebSocket 连接，心跳及唯一收件推送；REST发布，不等同原生客户端发送ACK |
+
+JuggleIM 的数据库启动竞态、OpenIM 的 ID/响应形态是基于源码的修正假设，具体旧故障根因仍需新日志证实。测试工具本身及配置尚未验收。所有变更限独立研究仓库和 Runner 临时源码副本。
+
+- [悟空 IM / JuggleIM 预检工作流](../.github/workflows/im-protocol-preflight.yml)，提交 01e068a7756488efac6c1b713f632e82fb4235c2。
+- [OpenIM 预检工作流](../.github/workflows/openim-protocol-preflight.yml)，提交 02f5ec178051a2cba8d0931bb89f2a3da787bd96；[运行 46083477773](https://github.com/trade3403/-globalchat-im-research/actions/runs/46083477773)。
+- [OpenIM 压测客户端](../scripts/openim-connection-ladder.go)，提交 8c5f9f12dd3f1922619d23a97327b5626cb4297a。
+
+各项预检通过后再扩大对应产品负载；失败需记录具体阶段及证据，不填造连接容量。后续再执行统一负载、资源效率、故障恢复和 Rust 同条件对比。本次尚未启动新的大规模梯度，未修改 GlobalChat 产品。
