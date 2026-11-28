@@ -318,3 +318,11 @@ GitHub Actions 两组运行均已完成，总体 failure，悟空 IM 子任务 s
 - [Phase 6G WuKongIM 50k and JuggleIM direct-network diagnosis run 46147500452](https://github.com/trade3403/-globalchat-im-research/actions/runs/46147500452)：查询时 in_progress。
 
 所有新实验结果尚未验收；正式产品仓库未修改。
+
+
+## 14. Phase 6G 增量结果与拓扑补充（2026-11-28）
+
+- OpenIM 单进程1000连接：[job 140986679935](https://github.com/trade3403/-globalchat-im-research/actions/runs/46147508055/job/140986679935) success；1000/1000真实鉴权，最小采样在线1000，2400 REST成功、2400唯一实时推送、0重复/断开/发送失败，连接P95 28.826ms，REST到推送P99 92.573ms，Pong 8000。历史只核对实时缺项，本轮无缺项；不代表已完成全量历史审计。
+- JuggleIM 桥接对照：[job 140986657763](https://github.com/trade3403/-globalchat-im-research/actions/runs/46147500452/job/140986657763) failure；上游压测程序拒绝非loopback地址，未进入有效连接阶段，不是容量失败。新工作流提交 `8da9196`，显式启用隔离环境的非loopback许可。
+- 悟空 IM 50000 子任务 [job 140986657508](https://github.com/trade3403/-globalchat-im-research/actions/runs/46147500452/job/140986657508) 查询时 in_progress，待结果。
+- 用户要求补齐部署拓扑：新增 [Phase 8 单节点与集群公平对照](phase8-im-topology-comparison.md) 及独立预检工作流，不覆盖正在运行的容量任务。正式产品仓库未修改。
