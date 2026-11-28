@@ -265,3 +265,20 @@ JuggleIM 的数据库启动竞态、OpenIM 的 ID/响应形态是基于源码的
 两个工作流均为 main 分支对应 YAML 的 push 路径触发；上述提交已成功写入 Git。当前连接器的 commit workflow runs 接口仅列 PR 触发运行，combined status 返回空数组，未能确认本次 push 的新 Run ID、排队或执行状态。不可写成运行通过或已完成，需从 [Actions](https://github.com/trade3403/-globalchat-im-research/actions) 获取新运行与日志后更新结果。旧 OpenIM 客户端只保存汇总，且临时数据库在 CI 清理，无法从旧日志恢复原3条消息的具体 ID；本轮是可审计复现而非追溯旧数据。新客户端和监控脚本尚未经 CI 编译/执行验证；若历史查询失败，不得将其计为永久丢失。历史补拉使用当前已知的私聊接口与合成账号，非生产账号。JuggleIM 1秒采样可能漏掉短暂事件，且本轮未加入逐连接认证在线证明。
 
 下一步：仅当悟空 IM 10000档通过再扩到30000、50000；JuggleIM 先读监听器与进程资源证据再决定修正；OpenIM 先完成实时推送与历史核对再扩容。保持原始证据、固定上游 SHA、研究仓库隔离；本轮未修改 GlobalChat 正式产品仓库，未获得任何新的容量通过数据。
+
+
+## 12. Phase 6E 实测结果（2026-11-28）
+
+GitHub Actions 两组运行均已完成，总体 failure，悟空 IM 子任务 success。以下数据来自实际 job 日志，不是配置目标。
+
+| 产品 | 目标 | 实际结果 | 判定 |
+|---|---:|---|---|
+| WuKongIM | 10000 | 连续7次 active=10000，03:05:37–03:06:49 UTC，约72秒；原有真实鉴权及消息流量断言通过 | 通过 |
+| JuggleIM | 12000 | 累计10916次成功连接，随后 reset/refused，未完成消息测量 | 失败 |
+| OpenIM | 20 | 20在线，2400 REST发送成功，2397唯一实时推送，3条历史找回，0重复，0意外断开 | 实时验收失败，缺失项历史核验通过 |
+
+- WuKongIM [job 140840847207](https://github.com/trade3403/-globalchat-im-research/actions/runs/46100257265/job/140840847207)：启动后等待约5分50秒才首次采到10000 active；未独立逐消息核对全量投递，也不是单节点容量。下一档为30000。
+- JuggleIM [job 140840846959](https://github.com/trade3403/-globalchat-im-research/actions/runs/46100257265/job/140840846959)：首次 reset 02:57:44 UTC，随后宿主机19003端口 refused；02:57:52采样容器内 imserver PID 15777 仍监听9003等端口，进程 FD=29、nofile=262144、ESTAB=13（全容器网络命名空间），memory.events oom_kill=0、pids.events max=0。采样在大量连接失败后，不能证明失败前峰值或排除瞬时问题。重复出现约10900累计成功连接；宿主机端口转发/代理、连接寿命及客户端行为值得优先隔离，尚未确认根因，不是产品架构上限。
+- OpenIM [job 140840924060](https://github.com/trade3403/-globalchat-im-research/actions/runs/46100281734/job/140840924060)：连接P95=10.848ms，REST到推送P99=111.233ms，实时缺失率0.125%，缺失 marker 恰为最初三条 capacity-msg-0/1/2，均通过接收者 token 历史查询找到，查询错误0，晚到推送0。仅对本轮缺失项证明历史可读；旧轮三条未追溯，未全量审计已推送消息的持久化。首批推送缺失提示连接注册/路由就绪时序可能有影响，仍需对照实验，不直接认定根因。保留严格实时验收。
+
+原始运行：[悟空/Juggle](https://github.com/trade3403/-globalchat-im-research/actions/runs/46100257265)，[OpenIM](https://github.com/trade3403/-globalchat-im-research/actions/runs/46100281734)。正式产品仓库未修改。
