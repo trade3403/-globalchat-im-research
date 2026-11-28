@@ -155,6 +155,9 @@ func run() int {
  }}}()
  // Start in bounded batches; established sessions remain live while later batches connect.
  for i:=0;i<n;i+=100{end:=min(i+100,n);var ready sync.WaitGroup;ready.Add(end-i);for _,id:=range ids[i:end]{life.Add(1);go worker(id,admin,done,&ready,&life)};ready.Wait()}
+ // Controlled readiness-delay experiment: no messages sent or discarded during the delay.
+ fmt.Println("all connection attempts finished; readiness delay 15s",active.Load())
+ time.Sleep(15*time.Second)
  startActive:=active.Load()
  fmt.Println("measurement starts",startActive)
  minActive:=startActive
