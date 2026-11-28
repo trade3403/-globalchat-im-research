@@ -293,3 +293,18 @@ GitHub Actions 两组运行均已完成，总体 failure，悟空 IM 子任务 s
 - [Phase 6F WuKongIM 30k connection ladder run 46111575138](https://github.com/trade3403/-globalchat-im-research/actions/runs/46111575138)：查询时 in_progress。
 
 新增试验结果尚未验收，正式产品仓库未修改。
+
+
+## 13. Phase 6F 实测结果（2026-11-28）
+
+两个工作流均 completed/success，实际 job 日志复核如下。
+
+| 产品 | 目标 | 结果 |
+|---|---:|---|
+| WuKongIM | 30000 | 连续7次 active=30000，05:44:07–05:45:19 UTC（约72秒），真实鉴权及有效流量、无新增收发错误的原断言通过 |
+| OpenIM | 20 | 20连接全程采样在线，2396 REST成功 / 0失败，2396唯一实时推送，0重复、0意外断开、0未观察到的推送；连接P95 13.577ms，REST到推送P99 101.058ms，Pong 160 |
+| JuggleIM | — | 本轮未重复同条件失败测试，约10900累计成功连接异常仍未定位 |
+
+- [WuKongIM job 140876062355](https://github.com/trade3403/-globalchat-im-research/actions/runs/46111575138/job/140876062355)，artifact 15250636763。三节点共享 Runner、抽样消息验证、短时在线观察，不等于单节点3万、全量投递或长时间稳定性。准备阶段长，首次观察到目标在线前状态为 waiting。
+- [OpenIM job 140876097002](https://github.com/trade3403/-globalchat-im-research/actions/runs/46111585956/job/140876097002)，artifact 15249124403。15秒连接就绪等待后，本轮所有成功发送均有匹配目标实时推送，严格断言通过；未丢弃初始消息。2396 是实际成功发送数，非固定2400。历史查询只对实时缺项执行，本轮无缺项，不代表全量历史持久化已经核验。单次实验支持就绪时序假设，不能证明上游根因或永久修复，也不能外推万人连接。仍使用 REST 发布而非原生客户端发送ACK。
+- 下一步悟空 IM 50000；OpenIM 按1000→10000扩展，保留就绪等待、心跳、真实目标推送和历史核验。JuggleIM 优先隔离宿主机端口代理与直接容器网络路径。正式产品仓库未修改。
