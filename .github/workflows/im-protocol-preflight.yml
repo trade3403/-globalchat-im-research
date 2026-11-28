@@ -1,4 +1,4 @@
-name: Phase 6F WuKongIM 30k connection ladder
+name: Phase 6G WuKongIM 50k and JuggleIM direct-network diagnosis
 on:
   push:
     branches: [main]
@@ -10,13 +10,14 @@ permissions:
 jobs:
   attempt:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 80
     strategy:
       fail-fast: false
       max-parallel: 3
       matrix:
         include:
-          - {name: wukong, repo: WuKongIM/WuKongIM, rev: 21d905a328bb7141167bc6dbe20fdb65588e0420, clients: 30000}
+          - {name: wukong, repo: WuKongIM/WuKongIM, rev: 21d905a328bb7141167bc6dbe20fdb65588e0420, clients: 50000}
+          - {name: juggle, repo: juggleim/im-server, rev: 0a47433c1aed6f08b48a3bfcf6b80dfe0a55a6c4, clients: 12000}
 
     steps:
       - name: Fetch pinned source and record limits
@@ -90,7 +91,7 @@ jobs:
           python3 - <<'PY'
           import urllib.request,json,time,pathlib,subprocess,os
           out=pathlib.Path('../reports')
-          deadline=time.monotonic()+1800
+          deadline=time.monotonic()+3000
           target=int(os.environ['WK_SIM_USERS'])
           peak=0; consecutive=0; baseline=None; passed=False
           while time.monotonic()<deadline:
@@ -155,8 +156,17 @@ jobs:
           s=p.read_text().replace('set -e\n','set -e\nset -o pipefail\n',1)
           p.write_text(s)
           p=Path('scripts/run-benchmark.sh')
-          s=p.read_text().replace('--clients "${clients}"','--clients "${clients}" --connect-concurrency 8')
-          assert '--connect-concurrency 8' in s
+          s=p.read_text()
+          old='docker compose up --detach --build'
+          assert s.count(old)==1
+          s=s.replace(old,old+'''
+          direct_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' juggleim-server)"
+          [[ "$direct_ip" =~ ^[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+$ ]]
+          ws_url="ws://${direct_ip}:9003"
+          echo "Direct Docker bridge WebSocket route: ${ws_url}"
+          ''')
+          s=s.replace('--clients "${clients}"','--clients "${clients}" --connect-concurrency 8')
+          assert '--connect-concurrency 8' in s and 'Direct Docker bridge' in s
           p.write_text(s)
           PY
           docker compose config --format json | jq -e '.services["im-server"].restart == "no" and .services.mysql.healthcheck.test[0] == "CMD-SHELL"'
