@@ -1,4 +1,4 @@
-name: Phase 6D WuKongIM and JuggleIM protocol preflight
+name: Phase 6E WuKongIM 10k and JuggleIM listener diagnosis
 on:
   push:
     branches: [main]
@@ -16,7 +16,7 @@ jobs:
       max-parallel: 3
       matrix:
         include:
-          - {name: wukong, repo: WuKongIM/WuKongIM, rev: 21d905a328bb7141167bc6dbe20fdb65588e0420, clients: 1000}
+          - {name: wukong, repo: WuKongIM/WuKongIM, rev: 21d905a328bb7141167bc6dbe20fdb65588e0420, clients: 10000}
           - {name: juggle, repo: juggleim/im-server, rev: 0a47433c1aed6f08b48a3bfcf6b80dfe0a55a6c4, clients: 12000}
     steps:
       - name: Fetch pinned source and record limits
@@ -90,7 +90,7 @@ jobs:
           python3 - <<'PY'
           import urllib.request,json,time,pathlib,subprocess,os
           out=pathlib.Path('../reports')
-          deadline=time.monotonic()+360
+          deadline=time.monotonic()+900
           target=int(os.environ['WK_SIM_USERS'])
           peak=0; consecutive=0; baseline=None; passed=False
           while time.monotonic()<deadline:
@@ -165,9 +165,31 @@ jobs:
           events=$!
           # A single source/destination TCP tuple pool is limited; this attempt
           # measures the shared-runner limit, not the server's capacity ceiling.
-          (while true; do date -u; ss -s; free -m; docker stats --no-stream --format '{{json .}}' || true; sleep 15; done) > ../reports/resource-samples.txt 2>&1 &
+          (while true; do date -u; ss -s; free -m; docker stats --no-stream --format '{{json .}}' || true; sleep 10; done) > ../reports/resource-samples.txt 2>&1 &
+          resource_monitor=$!
+          # Sample the server network namespace and each process, not just container state.
+          (while true; do
+            date -u +%FT%T.%NZ
+            pid=$(docker inspect -f '{{.State.Pid}}' juggleim-server 2>/dev/null || echo 0)
+            if [[ "$pid" =~ ^[1-9][0-9]*$ ]] && sudo test -d "/proc/$pid"; then
+              sudo nsenter -t "$pid" -n ss -lntp || true
+              sudo nsenter -t "$pid" -n ss -Htan | awk '{n[$1]++} END {for (k in n) print k,n[k]}' || true
+              docker top juggleim-server -eo pid,ppid,comm,rss,nlwp || true
+              for p in $(docker top juggleim-server -eo pid 2>/dev/null | awk 'NR>1 && $1 ~ /^[0-9]+$/ {print $1}'); do
+                echo "pid=$p fd=$(sudo ls /proc/$p/fd 2>/dev/null | wc -l)"
+                sudo grep -E 'Max open files|Max processes' "/proc/$p/limits" || true
+                cg=$(sudo awk -F: '$1=="0" {print $3}' "/proc/$p/cgroup" 2>/dev/null || true)
+                if [[ -n "$cg" ]]; then
+                  for f in memory.current memory.max memory.events pids.current pids.max pids.events; do
+                    echo "$f"; sudo cat "/sys/fs/cgroup$cg/$f" 2>/dev/null || true
+                  done
+                fi
+              done
+            fi
+            sleep 1
+          done) > ../reports/listener-samples.txt 2>&1 &
           monitor=$!
-          trap 'kill "$monitor" "$events" 2>/dev/null || true' EXIT
+          trap 'kill "$monitor" "$events" "$resource_monitor" 2>/dev/null || true' EXIT
           timeout --signal=TERM --kill-after=30s 25m bash scripts/run-benchmark.sh private 2>&1 | tee ../reports/benchmark.log
           jq -e --argjson n "$BENCH_CLIENTS" '.connections.attempted==$n and .connections.succeeded==$n and .connections.failed==0 and .message_acknowledgements.succeeded>0 and .message_acknowledgements.failed==0 and .deliveries.succeeded>0 and .deliveries.failed==0' ../reports/*-private.json
       - name: Capture evidence and cleanup
@@ -185,6 +207,8 @@ jobs:
             docker inspect --format '{{.Name}} {{json .State}} restart={{.RestartCount}}' juggleim-server juggleim-mysql | tee ../reports/exit-state.txt || true
             sudo dmesg | grep -Ei 'oom|out of memory|killed process' | tail -n 50 | tee ../reports/kernel-oom.txt || true
             docker compose logs --no-color > ../reports/service.log 2>&1 || true
+            if test -f ../reports/listener-samples.txt; then tail -n 180 ../reports/listener-samples.txt; fi
+            if test -f ../reports/docker-events.jsonl; then tail -n 25 ../reports/docker-events.jsonl; fi
             grep -Ein 'panic:|fatal error:|runtime:|out of memory|too many open files|killed' ../reports/service.log | tail -n 40 | cut -c1-500 || true
             docker compose down -v --remove-orphans || true
           fi
