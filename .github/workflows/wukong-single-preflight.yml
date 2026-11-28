@@ -1,0 +1,160 @@
+name: Phase 8 WuKongIM single-node preflight
+on:
+  push:
+    branches: [main]
+    paths: ['.github/workflows/wukong-single-preflight.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+jobs:
+  attempt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 80
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        include:
+          - {name: wukong, repo: WuKongIM/WuKongIM, rev: 21d905a328bb7141167bc6dbe20fdb65588e0420, clients: 1000}
+
+
+    steps:
+      - name: Fetch pinned source and record limits
+        env:
+          REPO: ${{ matrix.repo }}
+          REV: ${{ matrix.rev }}
+        run: |
+          set -euo pipefail
+          mkdir -p reports
+          git init -q upstream
+          git -C upstream fetch -q --depth=1 "https://github.com/$REPO.git" "$REV"
+          git -C upstream checkout -q --detach FETCH_HEAD
+          test "$(git -C upstream rev-parse HEAD)" = "$REV"
+          printf '%s %s\n' "$REPO" "$REV" > reports/source.txt
+          lscpu > reports/cpu.txt
+          free -m > reports/memory.txt
+          sudo sysctl -w net.ipv4.ip_local_port_range="1024 65535"
+          { ulimit -Sn; ulimit -Hn; sysctl net.ipv4.ip_local_port_range fs.file-max; } > reports/limits.txt
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: upstream/go.mod
+          cache: false
+      - name: Restrict published ports to loopback
+        working-directory: upstream
+        run: |
+          python3 - <<'PY'
+          import pathlib,re
+          p=pathlib.Path('docker-compose.yml')
+          s=re.sub(r'(?m)^(\s*-\s*")(?=(?:\d+|\$\{[A-Z_]+:-\d+\}):\d+")',r'\g<1>127.0.0.1:',p.read_text())
+          p.write_text(s)
+          PY
+          docker compose --profile dev-sim config --format json | jq -e 'all(.services[].ports[]?; .host_ip == "127.0.0.1")'
+      - name: WuKongIM actual protocol connection attempt
+        if: matrix.name == 'wukong'
+        working-directory: upstream
+        env:
+          WK_SIM_USERS: '${{ matrix.clients }}'
+          WK_SIM_PERSON_CHANNELS: '5'
+          WK_SIM_GROUP_CHANNELS: '2'
+          WK_SIM_GROUP_MEMBERS: '10'
+          WK_SIM_RATE: '0.2/s'
+          WK_SIM_VERIFY_RECV: sampled
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          import re,tomllib
+          p=Path('docker/conf/node1.toml')
+          s=p.read_text()
+          s=s.replace('slot_replica_n = 3','slot_replica_n = 1')
+          s=re.sub(r'(?m)^\[\[cluster\.nodes\]\]\nid = [23]\naddr = "[^"]+"\n','',s)
+          c=tomllib.loads(s)
+          assert len(c['cluster']['nodes'])==1 and c['cluster']['slot_replica_n']==1
+          p.write_text(s)
+          p=Path('docker/sim/dev-sim.yaml')
+          s=p.read_text()
+          s=re.sub(r'(?m)^    - (?:http://)?wk-node[23]:[0-9]+\n','',s)
+          assert 'wk-node2' not in s and 'wk-node3' not in s
+          p.write_text(s)
+          PY
+          sed -i 's/connect_rate: 10\/s/connect_rate: 200\/s/' docker/sim/dev-sim.yaml
+          # Use upstream's real token provisioning rather than bypassing authentication.
+          sed -i 's/token_mode: none/token_mode: bench_api/' docker/sim/dev-sim.yaml
+          grep -q 'token_mode: bench_api' docker/sim/dev-sim.yaml
+          git diff -- docker/conf/node1.toml docker/sim/dev-sim.yaml docker-compose.yml > ../reports/fixture.patch
+          cat > ci-capacity.yml <<'YAML'
+          services:
+            wk-sim:
+              sysctls:
+                net.ipv4.ip_local_port_range: "1024 65535"
+              ulimits:
+                nofile:
+                  soft: 524288
+                  hard: 524288
+            wk-node1:
+              ulimits:
+                nofile: 524288
+            wk-node2:
+              ulimits:
+                nofile: 524288
+            wk-node3:
+              ulimits:
+                nofile: 524288
+          YAML
+          docker compose -f docker-compose.yml -f ci-capacity.yml --profile dev-sim up -d --build wk-node1
+          docker compose -f docker-compose.yml -f ci-capacity.yml --profile dev-sim up -d --no-deps --no-build wk-sim
+          python3 - <<'PY'
+          import urllib.request,json,time,pathlib,subprocess,os
+          out=pathlib.Path('../reports')
+          deadline=time.monotonic()+900
+          target=int(os.environ['WK_SIM_USERS'])
+          peak=0; consecutive=0; baseline=None; passed=False
+          while time.monotonic()<deadline:
+              try:
+                  with urllib.request.urlopen('http://127.0.0.1:19091/status',timeout=5) as r: s=json.load(r)
+                  s['sample_unix']=time.time()
+                  with (out/'status.jsonl').open('a') as f: f.write(json.dumps(s)+'\n')
+                  active=int(s.get('active_users',0)); peak=max(peak,active)
+                  print('active',active,'peak',peak,'state',s.get('state'),'error',s.get('last_error',''),flush=True)
+                  if s.get('state')=='running' and active>=target:
+                      if consecutive==0: baseline=s
+                      consecutive+=1
+                      if consecutive>=7 and s.get('messages_sent',0)>baseline.get('messages_sent',0) and s.get('send_errors',0)==baseline.get('send_errors',0) and s.get('recv_errors',0)==baseline.get('recv_errors',0):
+                          passed=True; break
+                  else: consecutive=0
+              except Exception as e:
+                  print('status unavailable:',str(e),flush=True); consecutive=0
+              with (out/'resources.jsonl').open('a') as f:
+                  try: subprocess.run(['docker','stats','--no-stream','--format','{{json .}}'],stdout=f,timeout=12,check=False)
+                  except subprocess.TimeoutExpired: pass
+              time.sleep(10)
+          (out/'result.json').write_text(json.dumps({'target':target,'peak_sampled_active':peak,'passed':passed,'criterion':'7 consecutive samples with target active users and nonzero successful traffic, no additional send/receive errors; simulator sampled verification, token mode bench_api'},indent=2))
+          if not passed: raise SystemExit('connection target not demonstrated')
+          PY
+      - name: Capture evidence and cleanup
+        if: always()
+        working-directory: upstream
+        run: |
+          mkdir -p ../reports
+          docker ps -a > ../reports/container-status.txt || true
+          if test -f ci-capacity.yml; then
+            docker compose -f docker-compose.yml -f ci-capacity.yml --profile dev-sim ps -a
+            if test -f ../reports/status.jsonl; then jq -r '[.state,.last_error] | @tsv' ../reports/status.jsonl | sort | uniq -c; fi
+            docker compose -f docker-compose.yml -f ci-capacity.yml --profile dev-sim logs --no-color --tail=100 > ../reports/service.log 2>&1 || true
+            docker compose -f docker-compose.yml -f ci-capacity.yml --profile dev-sim down -v --remove-orphans || true
+          else
+            docker inspect --format '{{.Name}} {{json .State}} restart={{.RestartCount}}' juggleim-server juggleim-mysql | tee ../reports/exit-state.txt || true
+            sudo dmesg | grep -Ei 'oom|out of memory|killed process' | tail -n 50 | tee ../reports/kernel-oom.txt || true
+            docker compose logs --no-color > ../reports/service.log 2>&1 || true
+            if test -f ../reports/listener-samples.txt; then tail -n 180 ../reports/listener-samples.txt; fi
+            if test -f ../reports/docker-events.jsonl; then tail -n 25 ../reports/docker-events.jsonl; fi
+            grep -Ein 'panic:|fatal error:|runtime:|out of memory|too many open files|killed' ../reports/service.log | tail -n 40 | cut -c1-500 || true
+            docker compose down -v --remove-orphans || true
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: wukong-single-${{ matrix.clients }}
+          path: reports/
+          retention-days: 30
