@@ -250,3 +250,18 @@ JuggleIM 的数据库启动竞态、OpenIM 的 ID/响应形态是基于源码的
 60秒发送窗口及10秒接收宽限期。严格验收要求所有发送均有对应目标推送，因此失败。未观察到的3条不能直接判为永久丢失；后续需要逐消息ID、目标用户及历史补拉核验，区分实时投递、延迟到达、统计缺陷与持久化丢失。无原生客户端发送ACK测量。证据：[job 140787587896](https://github.com/trade3403/-globalchat-im-research/actions/runs/46083477773/job/140787587896)。账号注册与真实连接的阻断已在本轮解除。
 
 下一步：悟空IM可进入1万连接梯度；JuggleIM继续定位约10900异常；OpenIM先核验缺少的3条实时推送，再扩量。当前报告不启动额外CI，不宣称Phase 6D整体通过。正式产品源码未变更。
+
+
+## 11. Phase 6E：万人梯度与消息完整性诊断（2026-11-28，已提交，待 CI 验收）
+
+本轮复核默认分支原报告提交 0c00fa9 及第10章两个运行的实际 job 状态和失败日志，未发现新的已完成容量结果。悟空 IM 1000 连接已通过，不再重复该档。JuggleIM 仍在 10918 次累计成功连接后出现 reset/refused，最终容器 running、restart=0、OOMKilled=false；未获得足以确定根因的证据。OpenIM 仍为 2400 REST 成功、2397 唯一实时推送、20 在线、0 重复、P99 90.114ms。
+
+| 任务 | 本轮提交 | 验收目标 |
+|---|---|---|
+| WuKongIM / JuggleIM | [7376f14](https://github.com/trade3403/-globalchat-im-research/commit/7376f14c0899346439aa469580c9443be6a0ae99) | 悟空 IM 保留 bench_api 鉴权和原有7次连续目标在线及流量断言，目标改为10000，采样期限900秒；JuggleIM 保持12000目标与原负载，新增进程/监听器/FD/cgroup及TCP状态连续采样，失败时输出诊断摘要 |
+| OpenIM 客户端 | [f654273](https://github.com/trade3403/-globalchat-im-research/commit/f654273cd105c87f135e0b87078827d205dfd944) | 每条成功发送记录合成 marker、预期发送者、接收者；核对真实推送对象；对10秒宽限后未观察到的消息使用接收者 token 查询历史，记录晚到推送、历史恢复数、查询错误和未查到数，不放宽原实时完整性断言 |
+| OpenIM CI | [1b14fa4](https://github.com/trade3403/-globalchat-im-research/commit/1b14fa4a788a8396d2306e1e20344b7b78aa8a73) | 20客户端重新运行并产出 message-ledger.json 与 history-reconciliation.json，复核历史补拉接口和严格验收 |
+
+两个工作流均为 main 分支对应 YAML 的 push 路径触发；上述提交已成功写入 Git。当前连接器的 commit workflow runs 接口仅列 PR 触发运行，combined status 返回空数组，未能确认本次 push 的新 Run ID、排队或执行状态。不可写成运行通过或已完成，需从 [Actions](https://github.com/trade3403/-globalchat-im-research/actions) 获取新运行与日志后更新结果。旧 OpenIM 客户端只保存汇总，且临时数据库在 CI 清理，无法从旧日志恢复原3条消息的具体 ID；本轮是可审计复现而非追溯旧数据。新客户端和监控脚本尚未经 CI 编译/执行验证；若历史查询失败，不得将其计为永久丢失。历史补拉使用当前已知的私聊接口与合成账号，非生产账号。JuggleIM 1秒采样可能漏掉短暂事件，且本轮未加入逐连接认证在线证明。
+
+下一步：仅当悟空 IM 10000档通过再扩到30000、50000；JuggleIM 先读监听器与进程资源证据再决定修正；OpenIM 先完成实时推送与历史核对再扩容。保持原始证据、固定上游 SHA、研究仓库隔离；本轮未修改 GlobalChat 正式产品仓库，未获得任何新的容量通过数据。
