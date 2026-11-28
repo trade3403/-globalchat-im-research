@@ -1,4 +1,4 @@
-name: Phase 6E OpenIM recipient history reconciliation
+name: Phase 6F OpenIM readiness-delay experiment
 on:
   push:
     branches: [main]
