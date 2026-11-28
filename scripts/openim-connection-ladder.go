@@ -23,6 +23,9 @@ import (
 
 var httpClient = &http.Client{Timeout: 15*time.Second, Transport:&http.Transport{MaxIdleConns:128,MaxIdleConnsPerHost:128}}
 var reportDir = os.Getenv("REPORTS")
+var nodes=1
+var nodeActive=make([]int,5)
+func nodeFor(id string) int {i,_:=strconv.Atoi(strings.TrimPrefix(id,"capacity"));return i%nodes}
 var connected, active, failed, dropped atomic.Int64
 var pongCount atomic.Int64
 var mu sync.Mutex
@@ -39,7 +42,9 @@ var latencies []float64
 func recordError(stage string) {mu.Lock(); errorsSeen[stage]++; mu.Unlock()}
 func post(path string, body any, token string) (map[string]any,error) {
  b,_:=json.Marshal(body)
- req,e:=http.NewRequest("POST","http://127.0.0.1:10002"+path,bytes.NewReader(b)); if e!=nil{return nil,e}
+ node:=0
+ if m,ok:=body.(map[string]any);ok && path=="/msg/send_msg"{if id,ok:=m["sendID"].(string);ok{node=nodeFor(id)}}
+ req,e:=http.NewRequest("POST",fmt.Sprintf("http://127.0.0.1:%d",10002+node*10)+path,bytes.NewReader(b)); if e!=nil{return nil,e}
  req.Header.Set("Content-Type","application/json"); req.Header.Set("operationID",strconv.FormatInt(time.Now().UnixNano(),10))
  if token!="" {req.Header.Set("token",token)}
  res,e:=httpClient.Do(req); if e!=nil{return nil,e}; defer res.Body.Close()
@@ -69,7 +74,7 @@ func worker(id,admin string,done <-chan struct{}, ready *sync.WaitGroup, lifetim
  q:=url.Values{"sendID":{id},"token":{token(d)},"platformID":{"5"},"operationID":{id},"isBackground":{"false"},"isMsgResp":{"true"},"sdkType":{"js"}}
  dialer:=websocket.Dialer{HandshakeTimeout:15*time.Second}
  begin:=time.Now()
- c,_,e:=dialer.Dial("ws://127.0.0.1:10001/?"+q.Encode(),nil)
+ c,_,e:=dialer.Dial(fmt.Sprintf("ws://127.0.0.1:%d/?",10001+nodeFor(id)*10)+q.Encode(),nil)
  if e!=nil{failed.Add(1);recordError("websocket_dial");return}
  defer c.Close()
  _=c.SetReadDeadline(time.Now().Add(15*time.Second))
@@ -77,7 +82,9 @@ func worker(id,admin string,done <-chan struct{}, ready *sync.WaitGroup, lifetim
  var ack struct{ErrCode *int}
  if e!=nil||json.Unmarshal(b,&ack)!=nil||ack.ErrCode==nil||*ack.ErrCode!=0{failed.Add(1);recordError("authentication_ack");return}
  mu.Lock();userTokens[id]=token(d);latencies=append(latencies,float64(time.Since(begin).Microseconds())/1000);mu.Unlock()
+ mu.Lock();nodeActive[nodeFor(id)]++;mu.Unlock()
  connected.Add(1);active.Add(1);completed=true;ready.Done()
+ defer func(){mu.Lock();nodeActive[nodeFor(id)]--;mu.Unlock()}()
  defer active.Add(-1)
  _=c.SetReadDeadline(time.Now().Add(45*time.Second))
  c.SetPongHandler(func(string)error{pongCount.Add(1);return c.SetReadDeadline(time.Now().Add(45*time.Second))})
@@ -138,6 +145,7 @@ func historyMissing(markers []string, maxSeq int) (map[string]bool,map[string]st
 }
 func run() int {
  n,e:=strconv.Atoi(os.Getenv("TARGET"));if e!=nil||n<2{return 2}
+ if raw:=os.Getenv("IM_NODES");raw!=""{nodes,e=strconv.Atoi(raw);if e!=nil||nodes<1||nodes>5||n<nodes{return 2}}
  b,e:=os.ReadFile("config/share.yml");if e!=nil{return 2}
  secret:="";for _,l:=range strings.Split(string(b),"\n"){if strings.HasPrefix(l,"secret:"){secret=strings.TrimSpace(strings.TrimPrefix(l,"secret:"))}}
  admin:=""
@@ -195,6 +203,8 @@ func run() int {
  s["target"]=n;s["min_sampled_active"]=minActive;s["sent_rest_success"]=sentOK;s["sent_rest_failure"]=sentFailed;s["unique_recipient_push"]=observed;s["duplicate_push"]=cutoffDuplicates;s["history_recovered"]=historyRecovered;s["missing_from_history"]=len(missing)-historyRecovered;s["history_query_errors"]=len(historyErrors);s["late_push_count"]=late
  s["connection_p95_ms"]=percentile(latencies,.95);s["rest_to_push_p99_ms"]=percentile(delivery,.99)
  pass:=minActive==int64(n)&&failed.Load()==0&&dropped.Load()==0&&sentOK>0&&sentFailed==0&&observed==sentOK&&cutoffDuplicates==0&&pongCount.Load()>=int64(n)
+ s["nodes"]=nodes;s["active_by_node"]=append([]int(nil),nodeActive[:nodes]...)
+ for i:=0;i<nodes;i++{expected:=(n+nodes-1-i)/nodes;if nodeActive[i]!=expected{pass=false}}
  s["passed"]=pass;mu.Unlock()
  writeJSON("result.json",s);out,_:=json.Marshal(s);fmt.Println(string(out))
  if !pass{return 1};return 0
