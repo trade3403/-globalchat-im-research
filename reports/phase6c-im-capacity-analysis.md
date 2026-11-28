@@ -308,3 +308,13 @@ GitHub Actions 两组运行均已完成，总体 failure，悟空 IM 子任务 s
 - [WuKongIM job 140876062355](https://github.com/trade3403/-globalchat-im-research/actions/runs/46111575138/job/140876062355)，artifact 15250636763。三节点共享 Runner、抽样消息验证、短时在线观察，不等于单节点3万、全量投递或长时间稳定性。准备阶段长，首次观察到目标在线前状态为 waiting。
 - [OpenIM job 140876097002](https://github.com/trade3403/-globalchat-im-research/actions/runs/46111585956/job/140876097002)，artifact 15249124403。15秒连接就绪等待后，本轮所有成功发送均有匹配目标实时推送，严格断言通过；未丢弃初始消息。2396 是实际成功发送数，非固定2400。历史查询只对实时缺项执行，本轮无缺项，不代表全量历史持久化已经核验。单次实验支持就绪时序假设，不能证明上游根因或永久修复，也不能外推万人连接。仍使用 REST 发布而非原生客户端发送ACK。
 - 下一步悟空 IM 50000；OpenIM 按1000→10000扩展，保留就绪等待、心跳、真实目标推送和历史核验。JuggleIM 优先隔离宿主机端口代理与直接容器网络路径。正式产品仓库未修改。
+
+
+### 13.1 Phase 6G 扩量与隔离实验（待验收）
+
+- 提交 `5834710`：WuKongIM 扩至50000连接，原断言不变，采样期限3000秒、工作流80分钟；JuggleIM 12000连接仍按相同负载，WebSocket 直连隔离 Runner 内容器桥接地址9003，绕开宿主机19003端口转发，保留真实鉴权、数据库及资源监控。该对照尚不能证明此前失败根因。
+- 提交 `b80c00c`：OpenIM 扩至1000连接，保留15秒就绪等待及原实时/历史验收。
+- [Phase 6G OpenIM authenticated 1000 connections run 46147508055](https://github.com/trade3403/-globalchat-im-research/actions/runs/46147508055)：查询时 in_progress。
+- [Phase 6G WuKongIM 50k and JuggleIM direct-network diagnosis run 46147500452](https://github.com/trade3403/-globalchat-im-research/actions/runs/46147500452)：查询时 in_progress。
+
+所有新实验结果尚未验收；正式产品仓库未修改。
