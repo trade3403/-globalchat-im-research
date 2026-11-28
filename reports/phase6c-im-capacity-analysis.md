@@ -282,3 +282,14 @@ GitHub Actions 两组运行均已完成，总体 failure，悟空 IM 子任务 s
 - OpenIM [job 140840924060](https://github.com/trade3403/-globalchat-im-research/actions/runs/46100281734/job/140840924060)：连接P95=10.848ms，REST到推送P99=111.233ms，实时缺失率0.125%，缺失 marker 恰为最初三条 capacity-msg-0/1/2，均通过接收者 token 历史查询找到，查询错误0，晚到推送0。仅对本轮缺失项证明历史可读；旧轮三条未追溯，未全量审计已推送消息的持久化。首批推送缺失提示连接注册/路由就绪时序可能有影响，仍需对照实验，不直接认定根因。保留严格实时验收。
 
 原始运行：[悟空/Juggle](https://github.com/trade3403/-globalchat-im-research/actions/runs/46100257265)，[OpenIM](https://github.com/trade3403/-globalchat-im-research/actions/runs/46100281734)。正式产品仓库未修改。
+
+
+### 12.1 Phase 6F 后续实验（待验收）
+
+- WuKongIM 30000 连接梯度，提交 `1e9ef0f`，保留原鉴权和验收口径，准备/采样期限扩至1800秒，工作流60分钟；不重复已通过10000档。
+- OpenIM 20客户端连接完成后等待15秒再发送，保留首条起全部消息及严格实时断言；提交 `b67c212`、`1a2253e`。这是针对首三条缺失的时序对照，并非已修复。
+- JuggleIM 仍待隔离宿主机转发和客户端/服务端连接寿命，不重复相同失败条件。
+- [Phase 6F OpenIM readiness-delay experiment run 46111585956](https://github.com/trade3403/-globalchat-im-research/actions/runs/46111585956)：查询时 queued。
+- [Phase 6F WuKongIM 30k connection ladder run 46111575138](https://github.com/trade3403/-globalchat-im-research/actions/runs/46111575138)：查询时 in_progress。
+
+新增试验结果尚未验收，正式产品仓库未修改。
