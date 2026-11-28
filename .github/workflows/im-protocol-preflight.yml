@@ -1,4 +1,4 @@
-name: Phase 6E WuKongIM 10k and JuggleIM listener diagnosis
+name: Phase 6F WuKongIM 30k connection ladder
 on:
   push:
     branches: [main]
@@ -10,14 +10,14 @@ permissions:
 jobs:
   attempt:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       max-parallel: 3
       matrix:
         include:
-          - {name: wukong, repo: WuKongIM/WuKongIM, rev: 21d905a328bb7141167bc6dbe20fdb65588e0420, clients: 10000}
-          - {name: juggle, repo: juggleim/im-server, rev: 0a47433c1aed6f08b48a3bfcf6b80dfe0a55a6c4, clients: 12000}
+          - {name: wukong, repo: WuKongIM/WuKongIM, rev: 21d905a328bb7141167bc6dbe20fdb65588e0420, clients: 30000}
+
     steps:
       - name: Fetch pinned source and record limits
         env:
@@ -90,7 +90,7 @@ jobs:
           python3 - <<'PY'
           import urllib.request,json,time,pathlib,subprocess,os
           out=pathlib.Path('../reports')
-          deadline=time.monotonic()+900
+          deadline=time.monotonic()+1800
           target=int(os.environ['WK_SIM_USERS'])
           peak=0; consecutive=0; baseline=None; passed=False
           while time.monotonic()<deadline:
