@@ -19,3 +19,8 @@ CI 首轮只采集公开源码的版本、文件清单、许可证与关键字�
 [三家 IM 容量、延迟、失败根因及后续记录规范](reports/phase6c-im-capacity-analysis.md)。包含已实测指标、未验证范围、1万/3万/5万阶梯测试、GlobalChat Rust 建议验收目标。每轮完成后须更新 Git 报告，保留失败证据及原始 CI 链接。
 
 [悟空 IM / JuggleIM 阶梯 CI](https://github.com/trade3403/-globalchat-im-research/actions/workflows/connection-ladder.yml) · [OpenIM 阶梯 CI](https://github.com/trade3403/-globalchat-im-research/actions/workflows/openim-connection-ladder.yml)
+
+
+## 单节点与集群公平对照（Phase 8）
+
+[单节点、三节点、五节点部署和统一验收矩阵](reports/phase8-im-topology-comparison.md) · [悟空 IM 单节点 CI](.github/workflows/wukong-single-preflight.yml) · [OpenIM 三实例 CI](.github/workflows/openim-cluster-preflight.yml) · [JuggleIM 桥接诊断 CI](.github/workflows/juggle-bridge-diagnosis.yml)。区分逻辑实例与独立主机、开放社区版与商业授权；按相同总资源和相同每节点资源分别比较。
